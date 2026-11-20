@@ -287,7 +287,7 @@ var MAP={
   cities:function(r){return {id:r.id,gov:r.gov,name:r.name,createdBy:r.created_by||""}},
   clients:function(r){return {id:r.id,type:r.type,name:r.name,detail:r.detail||"",cls:r.cls,phone:r.phone||"",address:r.address||"",gov:r.gov,cityId:r.city_id,ownerId:r.owner_id}},
   visits:function(r){return {id:r.id,repId:r.rep_id,clientId:r.client_id,date:r.visit_date,at:r.visited_at,outcome:r.outcome||"",products:r.products||[],notes:r.notes||"",followup:r.followup||"",followupDate:r.followup_date||"",lat:r.lat==null?null:r.lat,lng:r.lng==null?null:r.lng,vtype:r.visit_type||"single",joint:r.joint_with||[]}},
-  plans:function(r){return {id:r.id,ownerId:r.owner_id,period:r.period,start:r.start_date,end:r.end_date,items:r.items||[],status:r.status,reviewNote:r.review_note||"",startTime:r.start_time||"",dayStarts:r.day_starts||{}}},
+  plans:function(r){return {id:r.id,ownerId:r.owner_id,period:r.period,start:r.start_date,end:r.end_date,items:r.items||[],status:r.status,reviewNote:r.review_note||"",startTime:r.start_time||"",dayStarts:r.day_starts||{},dayItems:r.day_items||{}}},
   products:function(r){return {id:r.id,name:r.name}}
 };
 var WIN_DAYS=130,BASEV=[],BASEP=[],EXV=[],EXP=[],OLDV={},LOADED_FROM=null;
@@ -493,11 +493,18 @@ var RSHORT={rep:"MR",dm:"DM",am:"AM",lm:"LM",bu:"BU"};
 function fmtHM(s){if(!s||s.indexOf(":")<0)return "";var p=s.split(":"),h=+p[0];return (h%12||12)+":"+p[1]+(h<12?" ص":" م")}
 function dayName(d){try{return new Date(d+"T12:00:00").toLocaleDateString("ar-EG",{weekday:"long"})}catch(e){return ""}}
 function startFor(p,d){return (p.dayStarts&&p.dayStarts[d])||p.startTime||""}
+function planOff(p){var di=p.dayItems||{};return Object.keys(di).length>0&&!(di[today()]&&di[today()].length)}
+function planToday(p){var di=p.dayItems||{};if(!Object.keys(di).length)return p.items||[];return di[today()]||[]}
 function startTxt(p){
-  var h="";
-  if(p.startTime)h+='<div class="sub">بداية الشغل: <b class="num">'+fmtHM(p.startTime)+'</b>'+(p.period!=="daily"?" كل يوم":"")+'</div>';
-  var ov=Object.keys(p.dayStarts||{}).filter(function(d){return d>=p.start&&d<=p.end}).sort();
-  if(ov.length)h+='<details class="dt"><summary>أيام ليها وقت مختلف ('+ov.length+')</summary><div class="sub" style="line-height:1.9">'+ov.map(function(d){return dayName(d)+" "+fmtD(d)+": "+fmtHM(p.dayStarts[d])}).join("<br>")+'</div></details>';
+  var di=p.dayItems||{},ks=Object.keys(di).filter(function(d){return di[d]&&di[d].length}).sort();
+  if(!ks.length)return p.startTime?'<div class="sub">بداية الشغل: <b class="num">'+fmtHM(p.startTime)+'</b></div>':"";
+  var t=today(),h="";
+  if(di[t]&&di[t].length)h+='<div class="sub">النهارده بتبدأ: <b class="num">'+fmtHM(startFor(p,t))+'</b></div>';
+  if(ks.length===1&&p.period==="daily")return p.startTime?'<div class="sub">بداية الشغل: <b class="num">'+fmtHM(startFor(p,ks[0]))+'</b></div>':"";
+  h+='<details class="dt"><summary>جدول الأيام ('+ks.length+')</summary><div class="sub" style="line-height:1.9">'+ks.map(function(d){
+    var names=di[d].map(function(i){var c=clientById(i);return c?esc(c.name):""}).filter(Boolean).join("، ");
+    return '<b>'+dayName(d)+' '+fmtD(d)+'</b> · '+fmtHM(startFor(p,d))+' · '+di[d].length+' عميل<br>'+names;
+  }).join("<hr style=\"border:0;border-top:1px solid var(--line);margin:6px 0\">")+'</div></details>';
   return h;
 }
 function visitTypeTxt(v){
@@ -560,9 +567,9 @@ function viewHome(){
   if(!act.length)h+=empty("مفيش خطة معتمدة لليوم. اعمل خطة وابعتها لمديرك.",'<button class="btn" data-act="newPlan">'+ic("plus")+' خطة جديدة</button>');
   act.forEach(function(p){
     var pr=planProg(p),pc=pr.total?Math.round(100*pr.done/pr.total):0;
-    var left=(p.items||[]).filter(function(i){return !pr.seen.has(i)&&clientById(i)}).slice(0,6);
+    var left=planToday(p).filter(function(i){return !pr.seen.has(i)&&clientById(i)}).slice(0,6);
     h+='<div class="card"><div class="row sb"><b>خطة '+PERIODS[p.period]+'</b><span class="sub num">'+rangeTxt(p)+'</span></div><div class="bar"><i style="width:'+pc+'%"></i></div>'+startTxt(p)+'<div class="sub num">تمت زيارة '+pr.done+' من '+pr.total+'</div>'+
-      (left.length?'<div class="lbl">المتبقي (اضغط لتسجيل زيارة)</div><div class="chips">'+left.map(function(i){return '<button class="chip" data-act="visit" data-id="'+esc(i)+'">'+esc(clientById(i).name)+'</button>'}).join("")+'</div>':'<div class="pill ok" style="align-self:flex-start">الخطة اتكملت</div>')+'</div>';
+      (left.length?'<div class="lbl">المتبقي (اضغط لتسجيل زيارة)</div><div class="chips">'+left.map(function(i){return '<button class="chip" data-act="visit" data-id="'+esc(i)+'">'+esc(clientById(i).name)+'</button>'}).join("")+'</div>':(planOff(p)?'<div class="sub">النهارده يوم راحة في الخطة</div>':'<div class="pill ok" style="align-self:flex-start">الخطة اتكملت</div>'))+'</div>';
   });
   h+='</div>';
   var tv=store.visits.filter(function(v){return inv(v,new Set([uid]))&&v.date===t}).sort(function(a,b){return (b.at||"")>(a.at||"")?1:-1});
@@ -991,57 +998,96 @@ function openCityForm(){
   sheet("مدينة جديدة في "+S.nav.gov,'<div class="field"><label for="ct-name">اسم المدينة</label><input id="ct-name" class="in" placeholder="مثال: مدينة نصر"></div><button class="btn primary block" data-act="saveCity">إضافة</button>');
 }
 
+function planDaysOf(p,rg){
+  var days={};
+  var di=p&&p.dayItems&&Object.keys(p.dayItems).length?p.dayItems:null;
+  if(di){Object.keys(di).forEach(function(d){days[d]={s:(p.dayStarts&&p.dayStarts[d])||p.startTime||"09:00",items:new Set(di[d])}})}
+  else if(p&&(p.items||[]).length){days[p.start]={s:p.startTime||"09:00",items:new Set(p.items)}}
+  return days;
+}
 function openPlanForm(id){
   var p=id?store.plans.find(function(x){return x.id===id}):null;
-  PF={id:id||null,period:p?p.period:"daily",ds:Object.assign({},p&&p.dayStarts)};
-  var mine=store.clients.filter(function(c){return c.ownerId===uid});
+  PF={id:id||null,period:p?p.period:"daily",days:planDaysOf(p),cur:null};
   var start=p?p.start:today();
-  var groups={};mine.forEach(function(c){var k=pathOf(c)||"بدون مدينة";(groups[k]=groups[k]||[]).push(c)});
-  var items=new Set(p?p.items:[]);
-  var list=Object.keys(groups).sort(function(a,b){return a.localeCompare(b,"ar")}).map(function(k){
-    return '<div class="grp">'+esc(k)+'</div>'+groups[k].sort(function(a,b){return a.name.localeCompare(b.name,"ar")}).map(function(c){
-      return '<label class="chk" data-s="'+esc(ar(c.name+" "+k))+'"><input type="checkbox" name="pc" value="'+esc(c.id)+'"'+(items.has(c.id)?" checked":"")+'><span><b>'+esc(c.name)+'</b> <span class="sub">'+esc(TYPES[c.type]?TYPES[c.type].n:"")+(c.cls?" · "+c.cls:"")+'</span></span></label>';
-    }).join("");
-  }).join("");
+  PF.mine=store.clients.filter(function(c){return c.ownerId===uid});
   sheet(p?"تعديل الخطة":"خطة جديدة",
     '<div class="field"><span class="lbl">نوع الخطة</span><div class="seg" id="pf-per">'+Object.keys(PERIODS).map(function(k){return '<button type="button" data-act="pfPer" data-v="'+k+'" class="'+(PF.period===k?"on":"")+'">'+PERIODS[k]+'</button>'}).join("")+'</div></div>'+
     '<div class="field"><label for="pf-date" id="pf-dl"></label><input id="pf-date" class="in" type="date" value="'+start+'"></div><div class="sub num" id="pf-range"></div>'+
-    '<div class="field"><label for="pf-start">وقت بداية الشغل</label><input id="pf-start" class="in" type="time" value="'+((p&&p.startTime)||"09:00")+'"></div>'+
-    '<div class="field" id="pf-dwrap" hidden><details class="dt"><summary>وقت مختلف لأيام معينة (اختياري)</summary><div class="grid2" id="pf-days" style="margin-top:8px"></div></details></div>'+
-    '<div class="field"><span class="lbl">العملاء (<span id="pf-cnt" class="num">0</span> مختار)</span><input id="pf-q" class="in" type="search" placeholder="ابحث في عملائي" data-in="pfq"><div class="pick" style="max-height:340px" id="pf-list">'+(mine.length?list:'<div class="empty">ضيف عملاء الأول من تبويب العملاء.</div>')+'</div></div>'+
+    '<div class="field" id="pf-stripw" hidden><span class="lbl">اختار اليوم واعمل خطته</span><div class="chips" id="pf-strip"></div></div>'+
+    '<div id="pf-panel"></div>'+
+    '<div class="sub num" id="pf-total"></div>'+
     '<div class="actions"><button class="btn" data-act="savePlan" data-mode="draft">حفظ كمسودة</button><button class="btn primary" data-act="savePlan" data-mode="send">إرسال للاعتماد</button></div>');
   pfSync();
 }
+function pfRange(){
+  var d=$("#pf-date"),cur=(d&&d.value)||today();
+  if(PF.period==="monthly"&&cur.length===7)cur+="-01";
+  return rangeFor(PF.period,cur);
+}
+function pfDayList(rg){var out=[],d=rg[0];while(d<=rg[1]&&out.length<40){out.push(d);d=addDays(d,1)}return out}
 function pfSync(){
   if(!PF)return;
   var d=$("#pf-date"),l=$("#pf-dl"),r=$("#pf-range");if(!d)return;
   var cur=d.value||today();
   if(PF.period==="monthly"){d.type="month";if(d.value.length>7)d.value=d.value.slice(0,7);l.textContent="الشهر";cur=(d.value||today().slice(0,7))+"-01"}
   else{if(d.type!=="date"){d.type="date";d.value=(cur.length===7?cur+"-01":cur)}l.textContent=PF.period==="daily"?"اليوم":"بداية الأسبوع";cur=d.value||today()}
-  var rg=rangeFor(PF.period,cur);r.textContent=rg[0]===rg[1]?"الخطة ليوم "+fmtD(rg[0]):"من "+fmtD(rg[0])+" إلى "+fmtD(rg[1]);
-  pfDays(rg);
-  pfCount();
+  var rg=rangeFor(PF.period,cur);
+  r.textContent=rg[0]===rg[1]?"الخطة ليوم "+fmtD(rg[0]):"من "+fmtD(rg[0])+" إلى "+fmtD(rg[1]);
+  var list=pfDayList(rg);
+  // لو تغير النطاق: اليوم الوحيد في الخطة اليومية بيتنقل للتاريخ الجديد
+  if(PF.period==="daily"){var ks=Object.keys(PF.days);if(ks.length&&ks.indexOf(rg[0])<0){var o=PF.days[ks[0]];PF.days={};PF.days[rg[0]]=o}}
+  Object.keys(PF.days).forEach(function(k){if(list.indexOf(k)<0)delete PF.days[k]});
+  if(!PF.cur||list.indexOf(PF.cur)<0)PF.cur=list[0];
+  $("#pf-stripw").hidden=list.length<2;
+  pfStrip(list);pfPanel();pfTotal();
 }
-function pfDays(rg){
-  var w=$("#pf-dwrap"),box=$("#pf-days");if(!w||!box)return;
-  Array.prototype.forEach.call(box.querySelectorAll("input[data-d]"),function(i){if(i.value)PF.ds[i.dataset.d]=i.value;else delete PF.ds[i.dataset.d]});
-  if(PF.period==="daily"||rg[0]===rg[1]){w.hidden=true;return}
-  w.hidden=false;var h="",d=rg[0],n=0;
-  while(d<=rg[1]&&n<40){h+='<div class="field"><label>'+dayName(d)+' <span class="num">'+fmtD(d)+'</span></label><input type="time" class="in" data-d="'+d+'" value="'+(PF.ds[d]||"")+'"></div>';d=addDays(d,1);n++}
-  box.innerHTML=h;
+function pfStrip(list){
+  var box=$("#pf-strip");if(!box)return;
+  box.innerHTML=(list||pfDayList(pfRange())).map(function(d){
+    var n=PF.days[d]?PF.days[d].items.size:0;
+    return '<button type="button" class="chip'+(d===PF.cur?" on":"")+'" data-act="pfDay" data-v="'+d+'">'+dayName(d)+' '+(+d.slice(8))+(n?' · '+n:"")+'</button>';
+  }).join("");
 }
-function pfCount(){var c=document.querySelectorAll('input[name="pc"]:checked').length,e=$("#pf-cnt");if(e)e.textContent=c}
+function pfDay(d){var e=PF.days[d];if(!e){e={s:"09:00",items:new Set()};PF.days[d]=e}return e}
+function pfPanel(){
+  var box=$("#pf-panel");if(!box||!PF||!PF.cur)return;
+  var e=pfDay(PF.cur),groups={};
+  PF.mine.forEach(function(c){var k=pathOf(c)||"بدون مدينة";(groups[k]=groups[k]||[]).push(c)});
+  var list=Object.keys(groups).sort(function(a,b){return a.localeCompare(b,"ar")}).map(function(k){
+    return '<div class="grp">'+esc(k)+'</div>'+groups[k].sort(function(a,b){return a.name.localeCompare(b.name,"ar")}).map(function(c){
+      return '<label class="chk" data-s="'+esc(ar(c.name+" "+k))+'"><input type="checkbox" name="pc" value="'+esc(c.id)+'"'+(e.items.has(c.id)?" checked":"")+'><span><b>'+esc(c.name)+'</b> <span class="sub">'+esc(TYPES[c.type]?TYPES[c.type].n:"")+(c.cls?" · "+c.cls:"")+'</span></span></label>';
+    }).join("");
+  }).join("");
+  var multi=PF.period!=="daily";
+  box.innerHTML=(multi?'<div class="row sb"><b>'+dayName(PF.cur)+' <span class="num">'+fmtD(PF.cur)+'</span></b></div>':"")+
+    '<div class="grid2"><div class="field"><label for="pf-start">وقت بداية الشغل</label><input id="pf-start" class="in" type="time" value="'+esc(e.s)+'" data-in="pfst"></div>'+
+    (multi?'<div class="field"><span class="lbl">&nbsp;</span><button type="button" class="btn sm" data-act="pfTimeAll">نفس الوقت لكل الأيام</button></div>':"")+'</div>'+
+    '<div class="field"><span class="lbl">عملاء اليوم (<span id="pf-cnt" class="num">'+e.items.size+'</span> مختار)</span><input id="pf-q" class="in" type="search" placeholder="ابحث في عملائي" data-in="pfq"><div class="pick" style="max-height:340px" id="pf-list">'+(PF.mine.length?list:'<div class="empty">ضيف عملاء الأول من تبويب العملاء.</div>')+'</div></div>';
+}
+function pfCheck(t){
+  var e=pfDay(PF.cur);
+  if(t.checked)e.items.add(t.value);else e.items.delete(t.value);
+  var c=$("#pf-cnt");if(c)c.textContent=e.items.size;
+  pfStrip();pfTotal();
+}
+function pfTotal(){
+  var el=$("#pf-total");if(!el||!PF)return;
+  var all=new Set(),n=0;
+  Object.keys(PF.days).forEach(function(d){if(PF.days[d].items.size){n++;PF.days[d].items.forEach(function(i){all.add(i)})}});
+  el.textContent=all.size?("الإجمالي: "+all.size+" عميل في "+n+(n===1?" يوم":" أيام")):"لسه مختارتش عملاء.";
+}
+
 async function savePlan(mode){
-  var items=Array.prototype.map.call(document.querySelectorAll('input[name="pc"]:checked'),function(x){return x.value});
-  if(!items.length){toast("اختار عميل واحد على الأقل");return}
   var raw=$("#pf-date").value;if(!raw){toast("حدد التاريخ");return}
   var start=PF.period==="monthly"?raw.slice(0,7)+"-01":raw,rg=rangeFor(PF.period,start);
-  var st=$("#pf-start").value;if(!st){toast("حدد وقت بداية الشغل");return}
-  pfDays([rg[0],rg[1]]);
-  var ds={};Object.keys(PF.ds).forEach(function(d){if(d>=rg[0]&&d<=rg[1]&&PF.ds[d]&&PF.ds[d]!==st)ds[d]=PF.ds[d]});
+  var days=Object.keys(PF.days).filter(function(d){return d>=rg[0]&&d<=rg[1]&&PF.days[d].items.size}).sort();
+  if(!days.length){toast("اختار عميل واحد على الأقل");return}
+  for(var k=0;k<days.length;k++){if(!PF.days[days[k]].s){toast("حدد وقت البداية ليوم "+dayName(days[k]));return}}
+  var di={},ds={},all=[],seen={};
+  days.forEach(function(d){var a=Array.from(PF.days[d].items);di[d]=a;ds[d]=PF.days[d].s;a.forEach(function(i){if(!seen[i]){seen[i]=1;all.push(i)}})});
   var me=meU(),top=me.role==="bu";
   var status=mode==="send"?(top?"approved":"pending"):"draft";
-  var row={period:PF.period,start_date:rg[0],end_date:rg[1],items:items,status:status,start_time:st,day_starts:ds};
+  var row={period:PF.period,start_date:rg[0],end_date:rg[1],items:all,status:status,start_time:ds[days[0]],day_starts:ds,day_items:di};
   var msg=mode==="send"?(top?"الخطة اتعتمدت":"اتبعتت للاعتماد"):"اتحفظت كمسودة";
   var ok;
   if(PF.id)ok=await dbw("plans",function(){return sb.from("plans").update(row).eq("id",PF.id)},msg);
@@ -1277,6 +1323,8 @@ var A={
     else{if(VF.joint.size>=jointNeed()){toast("اخترت العدد المطلوب. شيل واحد الأول.");return}VF.joint.add(d.id)}
     fillJoint($("#vf-jq")?$("#vf-jq").value:"");
   },
+  pfDay:function(d){PF.cur=d.v;pfStrip();pfPanel()},
+  pfTimeAll:function(){var s=pfDay(PF.cur).s;pfDayList(pfRange()).forEach(function(d){pfDay(d).s=s});toast("اتطبق الوقت على كل الأيام")},
   vfLoc:function(){getLoc()},
   vfProd:function(d,el){if(VF.prods.has(d.v)){VF.prods.delete(d.v);el.classList.remove("on")}else{VF.prods.add(d.v);el.classList.add("on")}},
   vfPick:function(d){VF.cid=d.id;paintVfClient()},
@@ -1412,13 +1460,14 @@ function onInput(e){
   if(k==="q"){S.q=t.value;var l=$("#clist");if(l)l.innerHTML=clistHtml()}
   else if(k==="vfq")fillVfRes(t.value);
   else if(k==="vfjq")fillJoint(t.value);
+  else if(k==="pfst"){pfDay(PF.cur).s=t.value}
   else if(k==="pfq"){var q=ar(t.value.trim());Array.prototype.forEach.call(document.querySelectorAll("#pf-list .chk"),function(x){x.hidden=q&&x.dataset.s.indexOf(q)<0})}
 }
 document.addEventListener("input",onInput);
 document.addEventListener("change",function(e){
   var t=e.target;
   if(t.id==="xl-file"){xlRead(t.files&&t.files[0]);return}
-  if(t.name==="pc"){pfCount();return}
+  if(t.name==="pc"){pfCheck(t);return}
   if(t.id==="pf-date"){pfSync();return}
   if(t.dataset&&t.dataset.in==="rp"){var rk=t.dataset.k;if(rk==="days")S.rp.days=+t.value;else S.rp[rk]=t.value;S.rp.all=false;render();ensureRange(repRange()[0]).then(function(){render()});return}
   if(!t.dataset||!t.dataset.in)return;
