@@ -142,6 +142,7 @@ details.dt>summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:
 .tb th{color:var(--muted);font-weight:600}
 @media (prefers-reduced-motion:no-preference){.item,.btn,.chip{transition:background .15s,border-color .15s}}
 
+[hidden]{display:none!important}
 .note.good{background:var(--ok-soft);color:var(--ok)}
 .card.dim{opacity:.62}
 
@@ -248,7 +249,7 @@ function lastVisitMap(){var m={};store.visits.forEach(function(v){if(!m[v.client
 function pathOf(c){return [c.gov,cityName(c.cityId)].filter(Boolean).join(" › ")}
 function pendingForMe(){return store.plans.filter(function(p){return p.status==="pending"&&isAnc(uid,p.ownerId)})}
 function planProg(p){
-  var seen=new Set(store.visits.filter(function(v){return v.repId===p.ownerId&&v.date>=p.start&&v.date<=p.end}).map(function(v){return v.clientId}));
+  var seen=new Set(store.visits.filter(function(v){return inv(v,new Set([p.ownerId]))&&v.date>=p.start&&v.date<=p.end}).map(function(v){return v.clientId}));
   var items=p.items||[];var done=items.filter(function(i){return seen.has(i)});
   return {done:done.length,total:items.length,seen:seen};
 }
@@ -285,8 +286,8 @@ var MAP={
   users:function(r){return {id:r.id,name:r.name,role:r.role,managerId:r.manager_id||"",active:r.active!==false}},
   cities:function(r){return {id:r.id,gov:r.gov,name:r.name,createdBy:r.created_by||""}},
   clients:function(r){return {id:r.id,type:r.type,name:r.name,detail:r.detail||"",cls:r.cls,phone:r.phone||"",address:r.address||"",gov:r.gov,cityId:r.city_id,ownerId:r.owner_id}},
-  visits:function(r){return {id:r.id,repId:r.rep_id,clientId:r.client_id,date:r.visit_date,at:r.visited_at,outcome:r.outcome||"",products:r.products||[],notes:r.notes||"",followup:r.followup||"",followupDate:r.followup_date||""}},
-  plans:function(r){return {id:r.id,ownerId:r.owner_id,period:r.period,start:r.start_date,end:r.end_date,items:r.items||[],status:r.status,reviewNote:r.review_note||""}},
+  visits:function(r){return {id:r.id,repId:r.rep_id,clientId:r.client_id,date:r.visit_date,at:r.visited_at,outcome:r.outcome||"",products:r.products||[],notes:r.notes||"",followup:r.followup||"",followupDate:r.followup_date||"",lat:r.lat==null?null:r.lat,lng:r.lng==null?null:r.lng,vtype:r.visit_type||"single",joint:r.joint_with||[]}},
+  plans:function(r){return {id:r.id,ownerId:r.owner_id,period:r.period,start:r.start_date,end:r.end_date,items:r.items||[],status:r.status,reviewNote:r.review_note||"",startTime:r.start_time||"",dayStarts:r.day_starts||{}}},
   products:function(r){return {id:r.id,name:r.name}}
 };
 var WIN_DAYS=130,BASEV=[],BASEP=[],EXV=[],EXP=[],OLDV={},LOADED_FROM=null;
@@ -398,7 +399,7 @@ async function loadOlder(id){
   }catch(e){toast(errMsg(e))}
 }
 function toVisitDb(v){
-  return {id:v.id,rep_id:uid,client_id:v.clientId,visit_date:v.date,visited_at:v.at,outcome:v.outcome||"",products:v.products||[],notes:v.notes||"",followup:v.followup||"",followup_date:v.followupDate||null};
+  return {id:v.id,rep_id:uid,client_id:v.clientId,visit_date:v.date,visited_at:v.at,outcome:v.outcome||"",products:v.products||[],notes:v.notes||"",followup:v.followup||"",followup_date:v.followupDate||null,lat:v.lat==null?null:v.lat,lng:v.lng==null?null:v.lng,visit_type:v.vtype||"single",joint_with:v.joint||[]};
 }
 var flushing=false;
 async function flushQueue(){
@@ -486,11 +487,56 @@ function clientRow(c,lv,path){
   var l=lv[c.id];
   return '<button class="item" data-act="openClient" data-id="'+esc(c.id)+'"><div class="main"><b>'+esc(c.name)+'</b><span class="sub">'+esc([TYPES[c.type]?TYPES[c.type].n:"",c.detail,path?pathOf(c):""].filter(Boolean).join(" · "))+'</span></div><div class="side">'+(c.cls?pill("فئة "+c.cls,c.cls==="A"?"pur":""):"")+'<span class="sub">'+(l?"آخر زيارة "+fmtD(l):"لا زيارات في آخر 4 شهور")+'</span></div></button>';
 }
+/* ---------- نوع الزيارة / الموقع / وقت بداية الخطة ---------- */
+var VT={single:{n:"Single",k:0},double:{n:"Double",k:1},triple:{n:"Triple",k:2},fourth:{n:"Fourth",k:3}};
+var RSHORT={rep:"MR",dm:"DM",am:"AM",lm:"LM",bu:"BU"};
+function fmtHM(s){if(!s||s.indexOf(":")<0)return "";var p=s.split(":"),h=+p[0];return (h%12||12)+":"+p[1]+(h<12?" ص":" م")}
+function dayName(d){try{return new Date(d+"T12:00:00").toLocaleDateString("ar-EG",{weekday:"long"})}catch(e){return ""}}
+function startFor(p,d){return (p.dayStarts&&p.dayStarts[d])||p.startTime||""}
+function startTxt(p){
+  var h="";
+  if(p.startTime)h+='<div class="sub">بداية الشغل: <b class="num">'+fmtHM(p.startTime)+'</b>'+(p.period!=="daily"?" كل يوم":"")+'</div>';
+  var ov=Object.keys(p.dayStarts||{}).filter(function(d){return d>=p.start&&d<=p.end}).sort();
+  if(ov.length)h+='<details class="dt"><summary>أيام ليها وقت مختلف ('+ov.length+')</summary><div class="sub" style="line-height:1.9">'+ov.map(function(d){return dayName(d)+" "+fmtD(d)+": "+fmtHM(p.dayStarts[d])}).join("<br>")+'</div></details>';
+  return h;
+}
+function visitTypeTxt(v){
+  if(!v.vtype||v.vtype==="single")return "";
+  var w=(v.joint||[]).map(nameOf);
+  return '<div class="sub">'+pill(VT[v.vtype]?VT[v.vtype].n:v.vtype,"acc")+(w.length?" مع "+w.map(esc).join("، "):"")+'</div>';
+}
+function mapLink(v){
+  if(v.lat==null||v.lng==null)return "";
+  return '<div class="sub"><a href="https://www.google.com/maps?q='+v.lat+','+v.lng+'" target="_blank" rel="noopener">عرض موقع الزيارة</a></div>';
+}
+function getLoc(){
+  var el=$("#vf-loc");if(!VF)return;
+  if(!navigator.geolocation){if(el)el.textContent="المتصفح ده مبيدعمش تحديد الموقع.";return}
+  VF.locBusy=true;if(el)el.textContent="جاري تحديد موقعك…";
+  navigator.geolocation.getCurrentPosition(function(pos){
+    if(!VF)return;VF.locBusy=false;
+    VF.loc={lat:Math.round(pos.coords.latitude*1e6)/1e6,lng:Math.round(pos.coords.longitude*1e6)/1e6,acc:Math.round(pos.coords.accuracy||0)};
+    var e=$("#vf-loc");if(e)e.textContent="تم تحديد الموقع ✓"+(VF.loc.acc?" (دقة حوالي "+VF.loc.acc+" متر)":"");
+  },function(err){
+    if(!VF)return;VF.locBusy=false;VF.loc=null;
+    var e=$("#vf-loc");if(e)e.textContent=err&&err.code===1?"الموقع مش مسموح. فعّله من إعدادات المتصفح للموقع ده.":"مقدرتش أحدد الموقع. جرّب تاني.";
+  },{enableHighAccuracy:true,timeout:15000,maximumAge:60000});
+}
+function jointNeed(){return VT[VF.type]?VT[VF.type].k:0}
+function fillJoint(q){
+  var box=$("#vf-jl");if(!box||!VF)return;q=ar((q||"").trim());
+  var list=store.users.filter(function(u){return u.active&&u.id!==uid&&(VF.joint.has(u.id)||!q||ar(u.name).indexOf(q)>-1)})
+    .sort(function(a,b){return (VF.joint.has(b.id)?1:0)-(VF.joint.has(a.id)?1:0)||a.name.localeCompare(b.name,"ar")}).slice(0,40);
+  box.innerHTML=list.length?list.map(function(u){return '<button type="button" class="chip'+(VF.joint.has(u.id)?" on":"")+'" data-act="vfJoint" data-id="'+esc(u.id)+'">'+esc(u.name)+' · '+RSHORT[u.role]+'</button>'}).join(""):'<div class="sub">مفيش نتائج.</div>';
+  var c=$("#vf-jc"),n=$("#vf-jn");if(c)c.textContent=VF.joint.size;if(n)n.textContent=jointNeed();
+}
+
+function inv(v,set){return set.has(v.repId)||(v.joint||[]).some(function(j){return set.has(j)})}
 function visitRow(v,showRep){
   var c=clientById(v.clientId);
   var tone=v.outcome==="ممتاز"?"ok":v.outcome==="ضعيف"?"bad":"";
   return '<div class="card"><div class="row sb"><b>'+(c?'<a href="#clients" data-act="openClient" data-id="'+esc(c.id)+'" style="color:inherit;text-decoration:none">'+esc(c.name)+'</a>':"عميل محذوف")+'</b>'+(v.pending?pill("مستنية الرفع","warn"):"")+(v.outcome?pill(v.outcome,tone):"")+'</div>'+
-    '<div class="sub">'+fmtD(v.date)+(v.at?" · "+fmtT(v.at):"")+(showRep?" · "+esc(nameOf(v.repId)):"")+'</div>'+
+    '<div class="sub">'+fmtD(v.date)+(v.at?" · "+fmtT(v.at):"")+(showRep?" · "+esc(nameOf(v.repId)):"")+'</div>'+visitTypeTxt(v)+mapLink(v)+
     ((v.products&&v.products.length)?'<div class="chips">'+v.products.map(function(p){return pill(p,"acc")}).join("")+'</div>':"")+
     (v.notes?'<div>'+esc(v.notes)+'</div>':"")+
     (v.followup?'<div class="sub">المتابعة: '+esc(v.followup)+(v.followupDate?" ("+fmtD(v.followupDate)+")":"")+'</div>':"")+
@@ -515,11 +561,11 @@ function viewHome(){
   act.forEach(function(p){
     var pr=planProg(p),pc=pr.total?Math.round(100*pr.done/pr.total):0;
     var left=(p.items||[]).filter(function(i){return !pr.seen.has(i)&&clientById(i)}).slice(0,6);
-    h+='<div class="card"><div class="row sb"><b>خطة '+PERIODS[p.period]+'</b><span class="sub num">'+rangeTxt(p)+'</span></div><div class="bar"><i style="width:'+pc+'%"></i></div><div class="sub num">تمت زيارة '+pr.done+' من '+pr.total+'</div>'+
+    h+='<div class="card"><div class="row sb"><b>خطة '+PERIODS[p.period]+'</b><span class="sub num">'+rangeTxt(p)+'</span></div><div class="bar"><i style="width:'+pc+'%"></i></div>'+startTxt(p)+'<div class="sub num">تمت زيارة '+pr.done+' من '+pr.total+'</div>'+
       (left.length?'<div class="lbl">المتبقي (اضغط لتسجيل زيارة)</div><div class="chips">'+left.map(function(i){return '<button class="chip" data-act="visit" data-id="'+esc(i)+'">'+esc(clientById(i).name)+'</button>'}).join("")+'</div>':'<div class="pill ok" style="align-self:flex-start">الخطة اتكملت</div>')+'</div>';
   });
   h+='</div>';
-  var tv=store.visits.filter(function(v){return v.repId===uid&&v.date===t}).sort(function(a,b){return (b.at||"")>(a.at||"")?1:-1});
+  var tv=store.visits.filter(function(v){return inv(v,new Set([uid]))&&v.date===t}).sort(function(a,b){return (b.at||"")>(a.at||"")?1:-1});
   h+='<div class="sec"><h2>زياراتي النهارده</h2>'+(tv.length?tv.map(function(v){return visitRow(v,false)}).join(""):empty("لسه مسجلتش زيارة النهارده."))+'</div>';
   return h;
 }
@@ -588,7 +634,7 @@ function planCard(p,opts){
   var mine=p.ownerId===uid;
   var h='<div class="card"><div class="row sb"><b>خطة '+PERIODS[p.period]+' · <span class="num">'+rangeTxt(p)+'</span></b>'+pill(st[0],st[1])+'</div>';
   if(!mine)h+='<div class="sub">'+esc(nameOf(p.ownerId))+' · '+ROLES[(U(p.ownerId)||{role:"rep"}).role].n+'</div>';
-  h+='<div class="bar"><i style="width:'+pc+'%"></i></div><div class="sub num">'+pr.total+' عميل في الخطة'+(p.status==="approved"?" · تمت زيارة "+pr.done:"")+'</div>';
+  h+='<div class="bar"><i style="width:'+pc+'%"></i></div>'+startTxt(p)+'<div class="sub num">'+pr.total+' عميل في الخطة'+(p.status==="approved"?" · تمت زيارة "+pr.done:"")+'</div>';
   if(p.status==="rejected"&&p.reviewNote)h+='<div class="note">سبب الرفض: '+esc(p.reviewNote)+'</div>';
   var names=(p.items||[]).map(function(i){var c=clientById(i);return c?esc(c.name)+(pr.seen.has(i)?" ✓":""):""}).filter(Boolean);
   if(names.length)h+='<details class="dt"><summary>عرض العملاء</summary><div class="sub" style="line-height:1.9">'+names.join(" · ")+'</div></details>';
@@ -614,7 +660,7 @@ function viewPlans(){
 
 function stats(ids,from,to,gov){
   var set=new Set(ids);
-  var v=store.visits.filter(function(x){return set.has(x.repId)&&x.date>=from&&x.date<=to});
+  var v=store.visits.filter(function(x){return inv(x,set)&&x.date>=from&&x.date<=to});
   var cl=store.clients.filter(function(c){return set.has(c.ownerId)});
   if(gov){
     v=v.filter(function(x){var c=clientById(x.clientId);return c&&c.gov===gov});
@@ -653,7 +699,7 @@ function trendHtml(ids,from,to,gov){
   if(days.length<2)return "";
   var set=new Set(ids),cnt={};
   store.visits.forEach(function(v){
-    if(!set.has(v.repId)||v.date<days[0]||v.date>to)return;
+    if(!inv(v,set)||v.date<days[0]||v.date>to)return;
     if(gov){var c=clientById(v.clientId);if(!c||c.gov!==gov)return}
     cnt[v.date]=(cnt[v.date]||0)+1;
   });
@@ -712,7 +758,7 @@ function viewTeam(){
     }).join("")+'</div>'+(nv.length>12?'<button class="btn" data-act="rpAll">'+(S.rp.all?"عرض أقل":"عرض الكل ("+nv.length+")")+'</button>':""):empty("كل العملاء اتزاروا في آخر "+S.rp.days+" يوم."))+'</div>';
 
   if(cur!==uid){
-    var rv=store.visits.filter(function(v){return v.repId===cur}).sort(function(a,b){return (b.at||b.date)>(a.at||a.date)?1:-1}).slice(0,15);
+    var rv=store.visits.filter(function(v){return inv(v,new Set([cur]))}).sort(function(a,b){return (b.at||b.date)>(a.at||a.date)?1:-1}).slice(0,15);
     h+='<div class="sec"><h2>آخر زياراته</h2>'+(rv.length?rv.map(function(v){return visitRow(v,false)}).join(""):empty("مفيش زيارات مسجلة."))+'</div>';
     var rp=store.plans.filter(function(p){return p.ownerId===cur&&p.status!=="draft"}).sort(function(a,b){return a.start<b.start?1:-1}).slice(0,8);
     if(rp.length)h+='<div class="sec"><h2>خططه</h2>'+rp.map(function(p){return planCard(p)}).join("")+'</div>';
@@ -729,15 +775,15 @@ async function rpExport(){
     var s=stats([id],from,to,gov),a=adherence([id],from,to,gov);
     sum.push([u.name,ROLES[u.role].n,u.managerId&&U(u.managerId)?U(u.managerId).name:"",s.visits,s.clients,s.covered,s.cov,s.a?Math.round(100*s.aCov/s.a):"",a.pct==null?"":a.pct]);
   });
-  var det=[["التاريخ","المندوب","العميل","النوع","المحافظة","المدينة","تفاعل العميل","المنتجات","الملاحظات","المتابعة"]];
-  store.visits.filter(function(v){return set.has(v.repId)&&v.date>=from&&v.date<=to}).sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:0}).forEach(function(v){
+  var det=[["التاريخ","المندوب","العميل","النوع","المحافظة","المدينة","تفاعل العميل","المنتجات","الملاحظات","المتابعة","نوع الزيارة","مع","الموقع"]];
+  store.visits.filter(function(v){return inv(v,set)&&v.date>=from&&v.date<=to}).sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:0}).forEach(function(v){
     var c=clientById(v.clientId);
     if(gov&&(!c||c.gov!==gov))return;
-    det.push([v.date,nameOf(v.repId),c?c.name:"عميل محذوف",c&&TYPES[c.type]?TYPES[c.type].n:"",c?c.gov:"",c?cityName(c.cityId):"",v.outcome||"",(v.products||[]).join("، "),v.notes||"",v.followup||""]);
+    det.push([v.date,nameOf(v.repId),c?c.name:"عميل محذوف",c&&TYPES[c.type]?TYPES[c.type].n:"",c?c.gov:"",c?cityName(c.cityId):"",v.outcome||"",(v.products||[]).join("، "),v.notes||"",v.followup||"",VT[v.vtype]?VT[v.vtype].n:"Single",(v.joint||[]).map(nameOf).join("، "),(v.lat!=null&&v.lng!=null)?"https://www.google.com/maps?q="+v.lat+","+v.lng:""]);
   });
   var wb=XLSX.utils.book_new(),w1=XLSX.utils.aoa_to_sheet(sum),w2=XLSX.utils.aoa_to_sheet(det);
   w1["!cols"]=[{wch:24},{wch:18},{wch:24},{wch:10},{wch:12},{wch:16},{wch:12},{wch:14},{wch:16}];
-  w2["!cols"]=[{wch:12},{wch:22},{wch:26},{wch:10},{wch:14},{wch:16},{wch:12},{wch:24},{wch:40},{wch:24}];
+  w2["!cols"]=[{wch:12},{wch:22},{wch:26},{wch:10},{wch:14},{wch:16},{wch:12},{wch:24},{wch:40},{wch:24},{wch:12},{wch:30},{wch:36}];
   XLSX.utils.book_append_sheet(wb,w1,"ملخص الأفراد");XLSX.utils.book_append_sheet(wb,w2,"الزيارات");
   wb.Workbook={Views:[{RTL:true}]};
   try{await dl.save({filename:"تقرير-"+from+"-إلى-"+to+".xlsx",data:XLSX.write(wb,{type:"array",bookType:"xlsx"})})}
@@ -871,7 +917,7 @@ function closeSheet(){
 document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!$("#sheet").hidden)closeSheet()});
 
 function openVisit(cid){
-  VF={cid:cid||null,outcome:"جيد",prods:new Set()};
+  VF={cid:cid||null,outcome:"جيد",prods:new Set(),type:"single",joint:new Set(),loc:null};
   var now=new Date(),dt=ymd(now)+"T"+pad(now.getHours())+":"+pad(now.getMinutes());
   var prods=store.products.map(function(p){return p.name}).sort(function(a,b){return a.localeCompare(b,"ar")});
   var ph=prods.length?'<div class="chips" id="vf-prods">'+prods.map(function(n){return '<button type="button" class="chip" data-act="vfProd" data-v="'+esc(n)+'">'+esc(n)+'</button>'}).join("")+'</div>':'<input id="vf-pfree" class="in" placeholder="اكتب أسماء المنتجات وافصل بينها بفاصلة"><div class="sub">الـ BU تقدر تضيف قائمة منتجات جاهزة من «حسابي».</div>';
@@ -879,12 +925,15 @@ function openVisit(cid){
   sheet("تسجيل زيارة",
     '<div class="field"><span class="lbl">العميل</span><div id="vf-client"></div></div>'+
     '<div class="field"><label for="vf-at">وقت الزيارة</label><input id="vf-at" type="datetime-local" class="in" value="'+dt+'"></div>'+
+    '<div class="field"><span class="lbl">نوع الزيارة</span><div class="chips" id="vf-type">'+Object.keys(VT).map(function(k){return '<button type="button" class="chip'+(k==="single"?" on":"")+'" data-act="vfType" data-v="'+k+'">'+VT[k].n+'</button>'}).join("")+'</div></div>'+
+    '<div class="field" id="vf-jwrap" hidden><span class="lbl">مع مين من الشركة؟ (<span id="vf-jc" class="num">0</span> من <span id="vf-jn" class="num">1</span>)</span><input id="vf-jq" class="in" type="search" placeholder="ابحث بالاسم" data-in="vfjq"><div class="chips" id="vf-jl"></div></div>'+
+    '<div class="field"><span class="lbl">موقع الزيارة</span><div class="row sb"><span class="sub" id="vf-loc">جاري تحديد موقعك…</span><button type="button" class="btn sm" data-act="vfLoc">تحديث الموقع</button></div></div>'+
     '<div class="field"><span class="lbl">تفاعل العميل</span><div class="chips" id="vf-out">'+OUTCOMES.map(function(o){return '<button type="button" class="chip'+(o==="جيد"?" on":"")+'" data-act="vfOutcome" data-v="'+o+'">'+o+'</button>'}).join("")+'</div></div>'+
     '<div class="field"><span class="lbl">المنتجات اللي اتعرضت</span>'+ph+'</div>'+
     '<div class="field"><label for="vf-notes">ملاحظات الزيارة</label><div class="micwrap"><textarea id="vf-notes" class="in '+(dict?"withmic":"")+'" placeholder="اتكلم أو اكتب اللي حصل في الزيارة"></textarea>'+mic+'</div><div class="partial" id="vf-partial"></div></div>'+
     '<div class="grid2"><div class="field"><label for="vf-follow">المتابعة المطلوبة</label><input id="vf-follow" class="in" placeholder="مثال: عينات الأسبوع الجاي"></div><div class="field"><label for="vf-fdate">ميعاد المتابعة</label><input id="vf-fdate" type="date" class="in"></div></div>'+
     '<button class="btn primary block" data-act="saveVisit">حفظ الزيارة</button>');
-  paintVfClient();
+  paintVfClient();getLoc();
 }
 function paintVfClient(){
   var box=$("#vf-client");if(!box||!VF)return;
@@ -901,9 +950,11 @@ function fillVfRes(q){
 }
 async function saveVisit(){
   if(!VF||!VF.cid){toast("اختار العميل الأول");return}
+  var need=jointNeed();
+  if(VF.joint.size!==need){toast(need?"اختار "+need+" من الشركة معاك":"");return}
   var at=$("#vf-at").value||(today()+"T09:00");
   var prods=store.products.length?Array.from(VF.prods):($("#vf-pfree")?$("#vf-pfree").value.split(/[,،\n]/).map(function(s){return s.trim()}).filter(Boolean):[]);
-  var v={id:newId(),repId:uid,clientId:VF.cid,date:at.slice(0,10),at:new Date(at).toISOString(),outcome:VF.outcome,products:prods,notes:$("#vf-notes").value.trim(),followup:$("#vf-follow").value.trim(),followupDate:$("#vf-fdate").value||""};
+  var v={id:newId(),repId:uid,clientId:VF.cid,date:at.slice(0,10),at:new Date(at).toISOString(),outcome:VF.outcome,products:prods,notes:$("#vf-notes").value.trim(),followup:$("#vf-follow").value.trim(),followupDate:$("#vf-fdate").value||"",vtype:VF.type,joint:Array.from(VF.joint),lat:VF.loc?VF.loc.lat:null,lng:VF.loc?VF.loc.lng:null};
   var q=qGet();q.push(v);qSet(q);
   store.visits=composeVisits(BASEV);
   closeSheet();
@@ -942,7 +993,7 @@ function openCityForm(){
 
 function openPlanForm(id){
   var p=id?store.plans.find(function(x){return x.id===id}):null;
-  PF={id:id||null,period:p?p.period:"daily"};
+  PF={id:id||null,period:p?p.period:"daily",ds:Object.assign({},p&&p.dayStarts)};
   var mine=store.clients.filter(function(c){return c.ownerId===uid});
   var start=p?p.start:today();
   var groups={};mine.forEach(function(c){var k=pathOf(c)||"بدون مدينة";(groups[k]=groups[k]||[]).push(c)});
@@ -955,6 +1006,8 @@ function openPlanForm(id){
   sheet(p?"تعديل الخطة":"خطة جديدة",
     '<div class="field"><span class="lbl">نوع الخطة</span><div class="seg" id="pf-per">'+Object.keys(PERIODS).map(function(k){return '<button type="button" data-act="pfPer" data-v="'+k+'" class="'+(PF.period===k?"on":"")+'">'+PERIODS[k]+'</button>'}).join("")+'</div></div>'+
     '<div class="field"><label for="pf-date" id="pf-dl"></label><input id="pf-date" class="in" type="date" value="'+start+'"></div><div class="sub num" id="pf-range"></div>'+
+    '<div class="field"><label for="pf-start">وقت بداية الشغل</label><input id="pf-start" class="in" type="time" value="'+((p&&p.startTime)||"09:00")+'"></div>'+
+    '<div class="field" id="pf-dwrap" hidden><details class="dt"><summary>وقت مختلف لأيام معينة (اختياري)</summary><div class="grid2" id="pf-days" style="margin-top:8px"></div></details></div>'+
     '<div class="field"><span class="lbl">العملاء (<span id="pf-cnt" class="num">0</span> مختار)</span><input id="pf-q" class="in" type="search" placeholder="ابحث في عملائي" data-in="pfq"><div class="pick" style="max-height:340px" id="pf-list">'+(mine.length?list:'<div class="empty">ضيف عملاء الأول من تبويب العملاء.</div>')+'</div></div>'+
     '<div class="actions"><button class="btn" data-act="savePlan" data-mode="draft">حفظ كمسودة</button><button class="btn primary" data-act="savePlan" data-mode="send">إرسال للاعتماد</button></div>');
   pfSync();
@@ -966,7 +1019,16 @@ function pfSync(){
   if(PF.period==="monthly"){d.type="month";if(d.value.length>7)d.value=d.value.slice(0,7);l.textContent="الشهر";cur=(d.value||today().slice(0,7))+"-01"}
   else{if(d.type!=="date"){d.type="date";d.value=(cur.length===7?cur+"-01":cur)}l.textContent=PF.period==="daily"?"اليوم":"بداية الأسبوع";cur=d.value||today()}
   var rg=rangeFor(PF.period,cur);r.textContent=rg[0]===rg[1]?"الخطة ليوم "+fmtD(rg[0]):"من "+fmtD(rg[0])+" إلى "+fmtD(rg[1]);
+  pfDays(rg);
   pfCount();
+}
+function pfDays(rg){
+  var w=$("#pf-dwrap"),box=$("#pf-days");if(!w||!box)return;
+  Array.prototype.forEach.call(box.querySelectorAll("input[data-d]"),function(i){if(i.value)PF.ds[i.dataset.d]=i.value;else delete PF.ds[i.dataset.d]});
+  if(PF.period==="daily"||rg[0]===rg[1]){w.hidden=true;return}
+  w.hidden=false;var h="",d=rg[0],n=0;
+  while(d<=rg[1]&&n<40){h+='<div class="field"><label>'+dayName(d)+' <span class="num">'+fmtD(d)+'</span></label><input type="time" class="in" data-d="'+d+'" value="'+(PF.ds[d]||"")+'"></div>';d=addDays(d,1);n++}
+  box.innerHTML=h;
 }
 function pfCount(){var c=document.querySelectorAll('input[name="pc"]:checked').length,e=$("#pf-cnt");if(e)e.textContent=c}
 async function savePlan(mode){
@@ -974,9 +1036,12 @@ async function savePlan(mode){
   if(!items.length){toast("اختار عميل واحد على الأقل");return}
   var raw=$("#pf-date").value;if(!raw){toast("حدد التاريخ");return}
   var start=PF.period==="monthly"?raw.slice(0,7)+"-01":raw,rg=rangeFor(PF.period,start);
+  var st=$("#pf-start").value;if(!st){toast("حدد وقت بداية الشغل");return}
+  pfDays([rg[0],rg[1]]);
+  var ds={};Object.keys(PF.ds).forEach(function(d){if(d>=rg[0]&&d<=rg[1]&&PF.ds[d]&&PF.ds[d]!==st)ds[d]=PF.ds[d]});
   var me=meU(),top=me.role==="bu";
   var status=mode==="send"?(top?"approved":"pending"):"draft";
-  var row={period:PF.period,start_date:rg[0],end_date:rg[1],items:items,status:status};
+  var row={period:PF.period,start_date:rg[0],end_date:rg[1],items:items,status:status,start_time:st,day_starts:ds};
   var msg=mode==="send"?(top?"الخطة اتعتمدت":"اتبعتت للاعتماد"):"اتحفظت كمسودة";
   var ok;
   if(PF.id)ok=await dbw("plans",function(){return sb.from("plans").update(row).eq("id",PF.id)},msg);
@@ -1201,6 +1266,18 @@ var A={
   },"اضغط تاني: هيمسح العميل وزياراته")},
   visit:function(d){openVisit(d.id||(S.tab==="clients"&&S.nav.clientId)||null)},
   vfOutcome:function(d,el){VF.outcome=d.v;Array.prototype.forEach.call($("#vf-out").children,function(b){b.classList.toggle("on",b===el)})},
+  vfType:function(d,el){
+    VF.type=d.v;Array.prototype.forEach.call($("#vf-type").children,function(b){b.classList.toggle("on",b===el)});
+    var need=jointNeed();
+    while(VF.joint.size>need)VF.joint.delete(Array.from(VF.joint).pop());
+    $("#vf-jwrap").hidden=!need;fillJoint($("#vf-jq")?$("#vf-jq").value:"");
+  },
+  vfJoint:function(d,el){
+    if(VF.joint.has(d.id))VF.joint.delete(d.id);
+    else{if(VF.joint.size>=jointNeed()){toast("اخترت العدد المطلوب. شيل واحد الأول.");return}VF.joint.add(d.id)}
+    fillJoint($("#vf-jq")?$("#vf-jq").value:"");
+  },
+  vfLoc:function(){getLoc()},
   vfProd:function(d,el){if(VF.prods.has(d.v)){VF.prods.delete(d.v);el.classList.remove("on")}else{VF.prods.add(d.v);el.classList.add("on")}},
   vfPick:function(d){VF.cid=d.id;paintVfClient()},
   vfChange:function(){VF.cid=null;paintVfClient()},
@@ -1334,6 +1411,7 @@ function onInput(e){
   var k=t.dataset.in;
   if(k==="q"){S.q=t.value;var l=$("#clist");if(l)l.innerHTML=clistHtml()}
   else if(k==="vfq")fillVfRes(t.value);
+  else if(k==="vfjq")fillJoint(t.value);
   else if(k==="pfq"){var q=ar(t.value.trim());Array.prototype.forEach.call(document.querySelectorAll("#pf-list .chk"),function(x){x.hidden=q&&x.dataset.s.indexOf(q)<0})}
 }
 document.addEventListener("input",onInput);
