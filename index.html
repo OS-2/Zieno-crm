@@ -142,6 +142,7 @@ details.dt>summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:
 .tb th{color:var(--muted);font-weight:600}
 @media (prefers-reduced-motion:no-preference){.item,.btn,.chip{transition:background .15s,border-color .15s}}
 
+.daybox{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:10px;background:var(--surface2)}.dcl{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:14px}.dcl:first-of-type{margin-top:6px}.ok-t{color:var(--ok);font-weight:700}
 [hidden]{display:none!important}
 .note.good{background:var(--ok-soft);color:var(--ok)}
 .card.dim{opacity:.62}
@@ -169,7 +170,7 @@ details.dt>summary{cursor:pointer;color:var(--accent);font-weight:600;font-size:
 "use strict";
 /* ---------- constants ---------- */
 var GOVS=["القاهرة","الجيزة","الإسكندرية","القليوبية","الشرقية","الدقهلية","الغربية","المنوفية","البحيرة","كفر الشيخ","دمياط","بورسعيد","الإسماعيلية","السويس","شمال سيناء","جنوب سيناء","الفيوم","بني سويف","المنيا","أسيوط","سوهاج","قنا","الأقصر","أسوان","البحر الأحمر","الوادي الجديد","مطروح"];
-var ROLES={rep:{n:"Medical Rep",r:1},dm:{n:"District Manager",r:2},am:{n:"Area Manager",r:3},lm:{n:"Line Manager",r:4},bu:{n:"Business Unit",r:5}};
+var ROLES={rep:{n:"Medical Rep",r:1},dm:{n:"District Manager",r:2},am:{n:"Area Manager",r:3},lm:{n:"Line Manager",r:4},bu:{n:"Business Unit",r:5},hr:{n:"HR",r:5}};
 var TYPES={doctor:{n:"دكتور",pl:"الدكاترة",d:"التخصص"},hospital:{n:"مستشفى",pl:"المستشفيات",d:"القسم / ملاحظات"},pharmacy:{n:"صيدلية",pl:"الصيدليات",d:"اسم الصيدلي"}};
 var PERIODS={daily:"يومية",weekly:"أسبوعية",monthly:"شهرية"};
 var STATUS={draft:["مسودة",""],pending:["في انتظار الاعتماد","warn"],approved:["معتمدة","ok"],rejected:["مرفوضة","bad"]};
@@ -218,18 +219,22 @@ var VF=null,PF=null,dictTarget=null;
 function U(id){return store.users.find(function(u){return u.id===id})}
 function meU(){return U(uid)}
 function rank(u){return u&&ROLES[u.role]?ROLES[u.role].r:1}
-function isBU(){var m=meU();return !!m&&m.role==="bu"}
+function topRole(r){return r==="bu"}
+function seesAll(r){return r==="bu"||r==="hr"}
+function noMgr(r){return r==="bu"||r==="hr"}
+function isHR(){var m=meU();return !!m&&m.role==="hr"}
+function isBU(){var m=meU();return !!m&&topRole(m.role)}
 function kids(id){
   var me=meU();
   return store.users.filter(function(u){
     if(!u.active||u.id===id)return false;
     if(u.managerId===id)return true;
-    return id===uid&&!!me&&me.role==="bu"&&!u.managerId&&u.role!=="bu";
+    return id===uid&&!!me&&seesAll(me.role)&&!u.managerId&&!noMgr(u.role);
   });
 }
 function desc(id){
   var me=meU();
-  if(id===uid&&me&&me.role==="bu")return store.users.filter(function(u){return u.id!==uid}).map(function(u){return u.id});
+  if(id===uid&&me&&seesAll(me.role))return store.users.filter(function(u){return u.id!==uid}).map(function(u){return u.id});
   var out=[],seen={},q=[id];seen[id]=1;
   while(q.length){var c=q.shift();store.users.forEach(function(k){if(k.managerId===c&&!seen[k.id]){seen[k.id]=1;out.push(k.id);q.push(k.id)}})}
   return out;
@@ -237,7 +242,7 @@ function desc(id){
 function isAnc(a,b){
   if(a===b)return false;
   var ua=U(a);
-  if(ua&&ua.role==="bu")return !!U(b);
+  if(ua&&seesAll(ua.role))return !!U(b);
   var c=(U(b)||{}).managerId,n=0;while(c&&n++<12){if(c===a)return true;c=(U(c)||{}).managerId}return false;
 }
 function scopeIds(){return [uid].concat(desc(uid))}
@@ -247,7 +252,7 @@ function clientById(id){return store.clients.find(function(c){return c.id===id})
 function nameOf(id){var u=U(id);return u?u.name:"مستخدم محذوف"}
 function lastVisitMap(){var m={};store.visits.forEach(function(v){if(!m[v.clientId]||v.date>m[v.clientId])m[v.clientId]=v.date});return m}
 function pathOf(c){return [c.gov,cityName(c.cityId)].filter(Boolean).join(" › ")}
-function pendingForMe(){return store.plans.filter(function(p){return p.status==="pending"&&isAnc(uid,p.ownerId)})}
+function pendingForMe(){if(meU()&&meU().role==="hr")return [];return store.plans.filter(function(p){return p.status==="pending"&&isAnc(uid,p.ownerId)})}
 function planProg(p){
   var seen=new Set(store.visits.filter(function(v){return inv(v,new Set([p.ownerId]))&&v.date>=p.start&&v.date<=p.end}).map(function(v){return v.clientId}));
   var items=p.items||[];var done=items.filter(function(i){return seen.has(i)});
@@ -285,7 +290,7 @@ var TBL={users:"profiles",cities:"cities",clients:"clients",visits:"visits",plan
 var MAP={
   users:function(r){return {id:r.id,name:r.name,role:r.role,managerId:r.manager_id||"",active:r.active!==false}},
   cities:function(r){return {id:r.id,gov:r.gov,name:r.name,createdBy:r.created_by||""}},
-  clients:function(r){return {id:r.id,type:r.type,name:r.name,detail:r.detail||"",cls:r.cls,phone:r.phone||"",address:r.address||"",gov:r.gov,cityId:r.city_id,ownerId:r.owner_id}},
+  clients:function(r){return {id:r.id,type:r.type,name:r.name,detail:r.detail||"",cls:r.cls,phone:r.phone||"",address:r.address||"",gov:r.gov,cityId:r.city_id,ownerId:r.owner_id,locs:r.locs||[]}},
   visits:function(r){return {id:r.id,repId:r.rep_id,clientId:r.client_id,date:r.visit_date,at:r.visited_at,outcome:r.outcome||"",products:r.products||[],notes:r.notes||"",followup:r.followup||"",followupDate:r.followup_date||"",lat:r.lat==null?null:r.lat,lng:r.lng==null?null:r.lng,vtype:r.visit_type||"single",joint:r.joint_with||[]}},
   plans:function(r){return {id:r.id,ownerId:r.owner_id,period:r.period,start:r.start_date,end:r.end_date,items:r.items||[],status:r.status,reviewNote:r.review_note||"",startTime:r.start_time||"",dayStarts:r.day_starts||{},dayItems:r.day_items||{}}},
   products:function(r){return {id:r.id,name:r.name}}
@@ -406,14 +411,14 @@ async function flushQueue(){
   if(flushing||!sb||!uid||!navigator.onLine)return;
   if(!qGet().length)return;
   flushing=true;
-  var sent=0,drop=0,done={};
+  var sent=0,drop=0,done={},why="";
   try{
     for(;;){
       var q=qGet().filter(function(x){return !done[x.id]});
       if(!q.length)break;
       var it=q[0],r;
       try{r=await sb.from("visits").upsert(toVisitDb(it),{onConflict:"id",ignoreDuplicates:true})}catch(e){break}
-      if(r.error){if(isNet(r.error))break;drop++;done[it.id]=1;continue}
+      if(r.error){if(isNet(r.error))break;drop++;done[it.id]=1;var em=String(r.error.message||"");if(em.indexOf("wrong_location")>-1)why="loc";else if(em.indexOf("location_required")>-1)why=why||"noloc";continue}
       sent++;done[it.id]=1;
     }
   }finally{
@@ -423,7 +428,7 @@ async function flushQueue(){
   if(sent||drop){
     try{await loadTables("visits")}catch(e){store.visits=composeVisits(BASEV);sched()}
     if(sent)toast(sent===1?"تم حفظ الزيارة":"اترفعت "+sent+" زيارة");
-    if(drop)toast(drop+" زيارة اترفضت (العميل اتحذف أو مفيش صلاحية)");
+    if(drop)toast(why==="loc"?drop+" زيارة اترفضت: ده مش موقع الدكتور":why==="noloc"?drop+" زيارة اترفضت: الموقع مش متسجل":drop+" زيارة اترفضت (العميل اتحذف أو مفيش صلاحية)");
   }
 }
 
@@ -489,23 +494,30 @@ function clientRow(c,lv,path){
 }
 /* ---------- نوع الزيارة / الموقع / وقت بداية الخطة ---------- */
 var VT={single:{n:"Single",k:0},double:{n:"Double",k:1},triple:{n:"Triple",k:2},fourth:{n:"Fourth",k:3}};
-var RSHORT={rep:"MR",dm:"DM",am:"AM",lm:"LM",bu:"BU"};
+var RSHORT={rep:"MR",dm:"DM",am:"AM",lm:"LM",bu:"BU",hr:"HR"};
+function hrPlans(idset){
+  var ps=store.plans.filter(function(p){return p.status!=="draft"&&idset.has(p.ownerId)}).sort(function(a,b){return a.start<b.start?1:-1}).slice(0,40);
+  return '<div class="sec"><h2>الخطط <span class="sub num">('+ps.length+')</span></h2>'+(ps.length?ps.map(function(p){return planCard(p,{open:true})}).join(""):empty("مفيش خطط لسه."))+'</div>';
+}
 function fmtHM(s){if(!s||s.indexOf(":")<0)return "";var p=s.split(":"),h=+p[0];return (h%12||12)+":"+p[1]+(h<12?" ص":" م")}
 function dayName(d){try{return new Date(d+"T12:00:00").toLocaleDateString("ar-EG",{weekday:"long"})}catch(e){return ""}}
 function startFor(p,d){return (p.dayStarts&&p.dayStarts[d])||p.startTime||""}
 function planOff(p){var di=p.dayItems||{};return Object.keys(di).length>0&&!(di[today()]&&di[today()].length)}
 function planToday(p){var di=p.dayItems||{};if(!Object.keys(di).length)return p.items||[];return di[today()]||[]}
-function startTxt(p){
+function hasDays(p){var di=p.dayItems||{};return Object.keys(di).some(function(d){return di[d]&&di[d].length})}
+function startTxt(p,open){
   var di=p.dayItems||{},ks=Object.keys(di).filter(function(d){return di[d]&&di[d].length}).sort();
   if(!ks.length)return p.startTime?'<div class="sub">بداية الشغل: <b class="num">'+fmtHM(p.startTime)+'</b></div>':"";
   var t=today(),h="";
   if(di[t]&&di[t].length)h+='<div class="sub">النهارده بتبدأ: <b class="num">'+fmtHM(startFor(p,t))+'</b></div>';
-  if(ks.length===1&&p.period==="daily")return p.startTime?'<div class="sub">بداية الشغل: <b class="num">'+fmtHM(startFor(p,ks[0]))+'</b></div>':"";
-  h+='<details class="dt"><summary>جدول الأيام ('+ks.length+')</summary><div class="sub" style="line-height:1.9">'+ks.map(function(d){
-    var names=di[d].map(function(i){var c=clientById(i);return c?esc(c.name):""}).filter(Boolean).join("، ");
-    return '<b>'+dayName(d)+' '+fmtD(d)+'</b> · '+fmtHM(startFor(p,d))+' · '+di[d].length+' عميل<br>'+names;
-  }).join("<hr style=\"border:0;border-top:1px solid var(--line);margin:6px 0\">")+'</div></details>';
-  return h;
+  if(ks.length===1&&p.period==="daily")return '<div class="sub">بداية الشغل: <b class="num">'+fmtHM(startFor(p,ks[0]))+'</b></div>';
+  var body=ks.map(function(d){
+    var vis=new Set(store.visits.filter(function(v){return v.date===d&&inv(v,new Set([p.ownerId]))}).map(function(v){return v.clientId}));
+    var rows=di[d].map(function(i){var c=clientById(i);if(!c)return "";
+      return '<div class="dcl"><span>'+esc(c.name)+' <span class="sub">'+esc(TYPES[c.type]?TYPES[c.type].n:"")+(c.cls?" · "+c.cls:"")+'</span></span>'+(vis.has(i)?'<span class="ok-t">✓</span>':"")+'</div>'}).join("");
+    return '<div class="daybox"><div class="row sb"><b>'+dayName(d)+' <span class="num">'+fmtD(d)+'</span></b><span class="pill">يبدأ&nbsp;<span class="num">'+fmtHM(startFor(p,d))+'</span></span></div><div class="sub num">'+di[d].length+' زيارة</div>'+rows+'</div>';
+  }).join("");
+  return h+'<details class="dt"'+(open?" open":"")+'><summary>جدول الأيام ('+ks.length+')</summary>'+body+'</details>';
 }
 function visitTypeTxt(v){
   if(!v.vtype||v.vtype==="single")return "";
@@ -517,17 +529,17 @@ function mapLink(v){
   return '<div class="sub"><a href="https://www.google.com/maps?q='+v.lat+','+v.lng+'" target="_blank" rel="noopener">عرض موقع الزيارة</a></div>';
 }
 function getLoc(){
-  var el=$("#vf-loc");if(!VF)return;
-  if(!navigator.geolocation){if(el)el.textContent="المتصفح ده مبيدعمش تحديد الموقع.";return}
-  VF.locBusy=true;if(el)el.textContent="جاري تحديد موقعك…";
+  if(!VF)return;
+  if(!navigator.geolocation){VF.locErr="المتصفح ده مبيدعمش تحديد الموقع.";paintLoc();return}
+  VF.locBusy=true;VF.locErr="";paintLoc();
   navigator.geolocation.getCurrentPosition(function(pos){
     if(!VF)return;VF.locBusy=false;
     VF.loc={lat:Math.round(pos.coords.latitude*1e6)/1e6,lng:Math.round(pos.coords.longitude*1e6)/1e6,acc:Math.round(pos.coords.accuracy||0)};
-    var e=$("#vf-loc");if(e)e.textContent="تم تحديد الموقع ✓"+(VF.loc.acc?" (دقة حوالي "+VF.loc.acc+" متر)":"");
+    paintLoc();
   },function(err){
     if(!VF)return;VF.locBusy=false;VF.loc=null;
-    var e=$("#vf-loc");if(e)e.textContent=err&&err.code===1?"الموقع مش مسموح. فعّله من إعدادات المتصفح للموقع ده.":"مقدرتش أحدد الموقع. جرّب تاني.";
-  },{enableHighAccuracy:true,timeout:15000,maximumAge:60000});
+    VF.locErr=err&&err.code===1?"الموقع مش مسموح. فعّله من إعدادات المتصفح للموقع ده.":"مقدرتش أحدد الموقع. جرّب تاني.";paintLoc();
+  },{enableHighAccuracy:true,timeout:15000,maximumAge:30000});
 }
 function jointNeed(){return VT[VF.type]?VT[VF.type].k:0}
 function fillJoint(q){
@@ -536,6 +548,31 @@ function fillJoint(q){
     .sort(function(a,b){return (VF.joint.has(b.id)?1:0)-(VF.joint.has(a.id)?1:0)||a.name.localeCompare(b.name,"ar")}).slice(0,40);
   box.innerHTML=list.length?list.map(function(u){return '<button type="button" class="chip'+(VF.joint.has(u.id)?" on":"")+'" data-act="vfJoint" data-id="'+esc(u.id)+'">'+esc(u.name)+' · '+RSHORT[u.role]+'</button>'}).join(""):'<div class="sub">مفيش نتائج.</div>';
   var c=$("#vf-jc"),n=$("#vf-jn");if(c)c.textContent=VF.joint.size;if(n)n.textContent=jointNeed();
+}
+
+var GEO=300;
+function distM(a,b,c,d){var R=6371000,r=Math.PI/180,x=Math.sin((c-a)*r/2),y=Math.sin((d-b)*r/2);return 2*R*Math.asin(Math.sqrt(x*x+Math.cos(a*r)*Math.cos(c*r)*y*y))}
+function minDist(c,loc){var m=Infinity;(c.locs||[]).forEach(function(l){var d=distM(loc.lat,loc.lng,l.lat,l.lng);if(d<m)m=d});return m}
+function locState(){
+  if(!VF)return {ok:false,t:""};
+  if(VF.locBusy)return {ok:false,t:"جاري تحديد موقعك…"};
+  if(!VF.loc)return {ok:false,t:VF.locErr||"الموقع لسه متحددش. اضغط «تحديث الموقع»."};
+  var c=VF.cid&&clientById(VF.cid);
+  if(!c)return {ok:true,t:"تم تحديد موقعك ✓"};
+  if(!(c.locs||[]).length)return {ok:true,t:"ده أول زيارة للعميل: موقعك هيتحفظ كموقع للدكتور ✓"};
+  var d=Math.round(minDist(c,VF.loc));
+  if(d>GEO)return {ok:false,bad:true,t:"ده مش موقع الدكتور. إنت بعيد حوالي "+d+" متر (المسموح "+GEO+" متر). لو للدكتور مكان تاني، ضيفه من صفحة العميل."};
+  return {ok:true,t:"إنت في نطاق موقع الدكتور ✓ ("+d+" متر)"};
+}
+function paintLoc(){var e=$("#vf-loc");if(!e||!VF)return;var s=locState();e.textContent=s.t;e.style.color=s.bad?"var(--bad)":""}
+function locsHtml(c){
+  var mine=c.ownerId===uid,canAdd=mine||isAnc(uid,c.ownerId);
+  var rows=(c.locs||[]).map(function(l,i){
+    return '<div class="dcl"><span><a href="https://www.google.com/maps?q='+l.lat+','+l.lng+'" target="_blank" rel="noopener">'+esc(l.label||("موقع "+(i+1)))+'</a></span>'+((!mine&&canAdd)?'<button class="btn sm danger" data-act="delLoc" data-id="'+esc(c.id)+'" data-i="'+i+'">حذف</button>':"")+'</div>'}).join("");
+  return '<div class="sec"><h2>مواقع العميل <span class="sub num">('+(c.locs||[]).length+')</span></h2><div class="card">'+
+    (rows||'<div class="sub">لسه مفيش موقع. أول زيارة هتحفظ موقعك كموقع للدكتور تلقائياً.</div>')+
+    '<div class="sub">الزيارة بتتسجل بس لو إنت في حدود '+GEO+' متر من موقع من دول.</div>'+
+    (canAdd?'<div><button class="btn sm" data-act="addLoc" data-id="'+esc(c.id)+'">إضافة موقع تاني للعميل (موقعي الحالي)</button></div>':"")+'</div></div>';
 }
 
 function inv(v,set){return set.has(v.repId)||(v.joint||[]).some(function(j){return set.has(j)})}
@@ -630,6 +667,7 @@ function viewClient(id){
     (c.address?'<div><span class="sub">العنوان:</span> '+esc(c.address)+'</div>':"")+
     (c.ownerId!==uid?'<div class="sub">المسؤول: '+esc(nameOf(c.ownerId))+'</div>':"")+
     '<div class="actions"><button class="btn primary" data-act="visit" data-id="'+esc(id)+'">'+ic("plus")+' تسجيل زيارة</button><button class="btn" data-act="editClient" data-id="'+esc(id)+'">تعديل البيانات</button></div></div>';
+  h+=locsHtml(c);
   h+='<div class="sec"><h2>تاريخ الزيارات <span class="sub num">('+vs.length+')</span></h2>'+(vs.length?vs.map(function(v){return visitRow(v,v.repId!==uid)}).join(""):empty("لسه ماتزارش."))+(S.olderLoaded[id]?"":'<button class="btn sm" data-act="loadOlder" data-id="'+esc(id)+'">تحميل الزيارات الأقدم من 4 شهور</button>')+'</div>';
   h+='<div><button class="btn sm danger" data-act="delClient" data-id="'+esc(id)+'">حذف العميل</button></div>';
   return h;
@@ -641,10 +679,10 @@ function planCard(p,opts){
   var mine=p.ownerId===uid;
   var h='<div class="card"><div class="row sb"><b>خطة '+PERIODS[p.period]+' · <span class="num">'+rangeTxt(p)+'</span></b>'+pill(st[0],st[1])+'</div>';
   if(!mine)h+='<div class="sub">'+esc(nameOf(p.ownerId))+' · '+ROLES[(U(p.ownerId)||{role:"rep"}).role].n+'</div>';
-  h+='<div class="bar"><i style="width:'+pc+'%"></i></div>'+startTxt(p)+'<div class="sub num">'+pr.total+' عميل في الخطة'+(p.status==="approved"?" · تمت زيارة "+pr.done:"")+'</div>';
+  h+='<div class="bar"><i style="width:'+pc+'%"></i></div>'+startTxt(p,opts.review||opts.open)+'<div class="sub num">'+pr.total+' عميل في الخطة'+(p.status==="approved"?" · تمت زيارة "+pr.done:"")+'</div>';
   if(p.status==="rejected"&&p.reviewNote)h+='<div class="note">سبب الرفض: '+esc(p.reviewNote)+'</div>';
   var names=(p.items||[]).map(function(i){var c=clientById(i);return c?esc(c.name)+(pr.seen.has(i)?" ✓":""):""}).filter(Boolean);
-  if(names.length)h+='<details class="dt"><summary>عرض العملاء</summary><div class="sub" style="line-height:1.9">'+names.join(" · ")+'</div></details>';
+  if(names.length&&!hasDays(p))h+='<details class="dt"><summary>عرض العملاء</summary><div class="sub" style="line-height:1.9">'+names.join(" · ")+'</div></details>';
   if(opts.review&&p.status==="pending"){
     h+='<div class="actions"><button class="btn primary" data-act="approve" data-id="'+esc(p.id)+'">اعتماد</button></div>'+
       '<details class="dt"><summary>رفض الخطة</summary><div class="field"><textarea class="in" id="rj-'+esc(p.id)+'" placeholder="سبب الرفض (اختياري)"></textarea><button class="btn danger" data-act="reject" data-id="'+esc(p.id)+'">تأكيد الرفض</button></div></details>';
@@ -725,7 +763,7 @@ function viewTeam(){
   var h=head(cur===uid?"الفريق":u.name,cur===uid?null:"teamBack");
   if(cur!==uid)h+='<div class="sub" style="margin-top:-8px">'+ROLES[u.role].n+'</div>';
   var pend=store.plans.filter(function(p){return p.status==="pending"&&idset.has(p.ownerId)&&isAnc(uid,p.ownerId)}).sort(function(a,b){return a.start<b.start?-1:1});
-  h+='<div class="sec"><h2>طلبات الاعتماد <span class="sub num">('+pend.length+')</span></h2>'+(pend.length?pend.map(function(p){return planCard(p,{review:true})}).join(""):empty("مفيش خطط مستنية اعتماد."))+'</div>';
+  if(meU().role==="hr")h+=hrPlans(idset);else h+='<div class="sec"><h2>طلبات الاعتماد <span class="sub num">('+pend.length+')</span></h2>'+(pend.length?pend.map(function(p){return planCard(p,{review:true})}).join(""):empty("مفيش خطط مستنية اعتماد."))+'</div>';
 
   var govs=GOVS.filter(function(g){return store.clients.some(function(c){return idset.has(c.ownerId)&&c.gov===g})});
   var opts=[["today","اليوم"],["week","الأسبوع"],["month","الشهر"],["last","الشهر اللي فات"],["custom","مخصص"]];
@@ -819,7 +857,7 @@ function viewAuth(){
   h+='<div class="field"><label for="au-email">الإيميل</label><input id="au-email" class="in" type="email" dir="ltr" autocomplete="email" inputmode="email" autocapitalize="none"></div>';
   if(m!=="forgot")h+='<div class="field"><label for="au-pw">الباسوورد</label><input id="au-pw" class="in" type="password" dir="ltr" autocomplete="'+(m==="signup"?"new-password":"current-password")+'"></div>';
   if(m==="signup"){
-    h+='<div class="field"><label for="au-role">وظيفتك</label><select id="au-role" class="in">'+["rep","dm","am","lm"].map(function(r){return '<option value="'+r+'">'+ROLES[r].n+'</option>'}).join("")+'</select></div>';
+    h+='<div class="field"><label for="au-role">وظيفتك</label><select id="au-role" class="in">'+["rep","dm","am","lm","hr"].map(function(r){return '<option value="'+r+'">'+ROLES[r].n+'</option>'}).join("")+'</select></div>';
     h+='<div class="field"><label for="au-code">كود الانضمام</label><input id="au-code" class="in" dir="ltr" autocapitalize="characters" autocomplete="off" placeholder="الكود اللي معاك من الـ Business Unit"><div class="sub">لو إنت أول مستخدم في النظام سيب الكود فاضي، وهتبقى Business Unit.</div></div>';
   }
   h+='<div class="note" id="au-msg" hidden></div>';
@@ -838,21 +876,21 @@ function viewBlocked(){
   return '<div class="center"><div class="card" style="width:100%;max-width:460px;margin:auto"><h2>الحساب موقوف</h2><div class="sub">كلّم الـ Business Unit لو فاكر إن ده غلط.</div><button class="btn block" data-act="logout">تسجيل خروج</button></div></div>';
 }
 function eligMgrs(me){
-  return store.users.filter(function(u){return u.active&&u.id!==me.id&&rank(u)>rank(me)}).sort(function(a,b){return rank(b)-rank(a)||a.name.localeCompare(b.name,"ar")});
+  return store.users.filter(function(u){return u.active&&u.role!=="hr"&&u.id!==me.id&&rank(u)>rank(me)}).sort(function(a,b){return rank(b)-rank(a)||a.name.localeCompare(b.name,"ar")});
 }
 function mgrSelect(me){
   return '<select id="pm-sel" class="in"><option value="">اختار</option>'+eligMgrs(me).map(function(u){return '<option value="'+esc(u.id)+'">'+esc(u.name)+' · '+ROLES[u.role].n+'</option>'}).join("")+'</select>';
 }
 function needMgr(me){
-  return me.role!=="bu"&&!me.managerId&&!S.skipMgr&&eligMgrs(me).length>0;
+  return !noMgr(me.role)&&!me.managerId&&!S.skipMgr&&eligMgrs(me).length>0;
 }
 function viewPickMgr(me){
   return '<div class="center"><div class="card" style="width:100%;max-width:460px;margin:auto"><h1>اختار مديرك المباشر</h1><div class="sub">عشان مديرك يشوف زياراتك ويعتمد خططك. تقدر تغيره بعدين من الـ Business Unit.</div><div class="field"><label for="pm-sel">المدير</label>'+mgrSelect(me)+'</div><button class="btn primary block" data-act="saveMgr">حفظ</button><button class="btn block" data-act="skipMgr">لاحقاً</button></div></div>';
 }
 function viewMore(){
   var me=meU(),h=head("حسابي",null);
-  h+='<div class="card"><div class="field"><label for="mn">الاسم</label><input id="mn" class="in" value="'+esc(me.name)+'"></div><div class="sub ltr">'+esc(authEmail)+'</div><div class="row sb"><div><div><b>'+ROLES[me.role].n+'</b></div><div class="sub">'+(me.managerId?"المدير: "+esc(nameOf(me.managerId)):(me.role==="bu"?"أعلى مستوى في الهيكل":"من غير مدير مباشر"))+'</div></div><button class="btn primary" data-act="saveName">حفظ الاسم</button></div></div>';
-  if(!me.managerId&&me.role!=="bu"){
+  h+='<div class="card"><div class="field"><label for="mn">الاسم</label><input id="mn" class="in" value="'+esc(me.name)+'"></div><div class="sub ltr">'+esc(authEmail)+'</div><div class="row sb"><div><div><b>'+ROLES[me.role].n+'</b></div><div class="sub">'+(me.managerId?"المدير: "+esc(nameOf(me.managerId)):(noMgr(me.role)?"من غير مدير مباشر":"من غير مدير مباشر"))+'</div></div><button class="btn primary" data-act="saveName">حفظ الاسم</button></div></div>';
+  if(!me.managerId&&!noMgr(me.role)){
     h+='<div class="card"><h3>مديرك المباشر</h3>'+(eligMgrs(me).length?'<div class="field">'+mgrSelect(me)+'</div><button class="btn primary" data-act="saveMgr">حفظ المدير</button>':'<div class="sub">لسه مفيش مديرين متسجلين. اختار مديرك بعد ما يسجلوا.</div>')+'</div>';
   }
   h+='<div class="card"><h3>تغيير الباسوورد</h3><div class="field"><label for="np-pw">الباسوورد الجديد</label><input id="np-pw" class="in" type="password" dir="ltr" autocomplete="new-password"></div><button class="btn" data-act="chPw">تغيير الباسوورد</button></div>';
@@ -860,14 +898,14 @@ function viewMore(){
     h+='<div class="card"><h3>تثبيت التطبيق على الموبايل</h3>'+(S.installEvt?'<button class="btn primary" data-act="install">تثبيت التطبيق</button>':'<div class="sub">أندرويد (Chrome): القائمة ⋮ ثم «تثبيت التطبيق» أو «إضافة إلى الشاشة الرئيسية».<br>آيفون (Safari): زر المشاركة ثم «إضافة إلى الشاشة الرئيسية».</div>')+'</div>';
   }
   h+='<button class="btn block" data-act="logout">تسجيل خروج</button>';
-  if(me.role==="bu"){
+  if(topRole(me.role)){
     h+='<div class="sec"><h2>كود انضمام الفريق</h2><div class="card"><div class="sub">أي حد عايز يفتح حساب لازم يكتب الكود ده. ابعته لفريقك بس.</div><div class="row sb"><b class="ltr num" style="font-size:22px;letter-spacing:2px;user-select:all">'+esc(S.joinCode||"...")+'</b><div class="actions"><button class="btn sm" data-act="copyCode">نسخ</button><button class="btn sm danger" data-act="newCode">كود جديد</button></div></div></div></div>';
     h+='<div class="sec"><h2>إدارة المستخدمين</h2><div class="list">';
     store.users.slice().sort(function(a,b){return rank(b)-rank(a)||a.name.localeCompare(b.name,"ar")}).forEach(function(u){
       var elig=store.users.filter(function(x){return x.id!==u.id&&x.active&&rank(x)>rank(u)});
       h+='<div class="card'+(u.active?"":" dim")+'"><div class="row sb"><b>'+esc(u.name)+(u.id===uid?" (أنت)":"")+(u.active?"":" · موقوف")+'</b>'+(u.id!==uid?'<button class="btn sm '+(u.active?"danger":"")+'" data-act="toggleUser" data-id="'+esc(u.id)+'">'+(u.active?"إيقاف":"تفعيل")+'</button>':"")+'</div>'+
         '<div class="grid2"><div class="field"><label for="ur-'+esc(u.id)+'">الوظيفة</label><select class="in" id="ur-'+esc(u.id)+'" data-in="uRole" data-id="'+esc(u.id)+'"'+(u.id===uid?" disabled":"")+'>'+Object.keys(ROLES).map(function(r){return '<option value="'+r+'"'+(u.role===r?" selected":"")+'>'+ROLES[r].n+'</option>'}).join("")+'</select></div>'+
-        '<div class="field"><label for="um-'+esc(u.id)+'">المدير المباشر</label><select class="in" id="um-'+esc(u.id)+'" data-in="uMgr" data-id="'+esc(u.id)+'"'+(u.role==="bu"?" disabled":"")+'><option value="">بدون</option>'+elig.map(function(x){return '<option value="'+esc(x.id)+'"'+(u.managerId===x.id?" selected":"")+'>'+esc(x.name)+' · '+ROLES[x.role].n+'</option>'}).join("")+'</select></div></div></div>';
+        '<div class="field"><label for="um-'+esc(u.id)+'">المدير المباشر</label><select class="in" id="um-'+esc(u.id)+'" data-in="uMgr" data-id="'+esc(u.id)+'"'+(topRole(u.role)?" disabled":"")+'><option value="">بدون</option>'+elig.map(function(x){return '<option value="'+esc(x.id)+'"'+(u.managerId===x.id?" selected":"")+'>'+esc(x.name)+' · '+ROLES[x.role].n+'</option>'}).join("")+'</select></div></div></div>';
     });
     h+='</div></div>';
     h+='<div class="sec"><h2>المنتجات</h2><div class="card"><div class="chips">'+(store.products.length?store.products.map(function(p){return '<button class="chip" data-act="delProduct" data-id="'+esc(p.id)+'">'+esc(p.name)+' ×</button>'}).join(""):'<span class="sub">لسه مفيش منتجات. المندوب بيختار منها وهو بيسجل الزيارة.</span>')+'</div><div class="row"><input id="np" class="in" style="flex:1" placeholder="اسم منتج جديد"><button class="btn primary" data-act="addProduct">إضافة</button></div></div></div>';
@@ -889,6 +927,7 @@ function render(){
   if(needMgr(me)){only(viewPickMgr(me));return}
   var tabs=[["home","الرئيسية","home"],["clients","العملاء","users"],["plans","الخطط","cal"]];
   if(rank(me)>=2)tabs.push(["team","الفريق","team"]);
+  if(me.role==="hr"){tabs=[["team","الفريق","team"]];if(S.tab!=="more")S.tab="team"}
   tabs.push(["more","حسابي","more"]);
   if(S.tab==="team"&&rank(me)<2)S.tab="home";
   var pe=rank(me)>=2?pendingForMe().length:0;
@@ -942,7 +981,7 @@ function openVisit(cid){
     '<button class="btn primary block" data-act="saveVisit">حفظ الزيارة</button>');
   paintVfClient();getLoc();
 }
-function paintVfClient(){
+function paintVfClient(){setTimeout(paintLoc,0);
   var box=$("#vf-client");if(!box||!VF)return;
   var c=VF.cid&&clientById(VF.cid);
   if(c){box.innerHTML='<div class="card"><div class="row sb"><div><b>'+esc(c.name)+'</b><div class="sub">'+esc(pathOf(c))+'</div></div><button type="button" class="btn sm" data-act="vfChange">تغيير</button></div></div>';return}
@@ -959,6 +998,10 @@ async function saveVisit(){
   if(!VF||!VF.cid){toast("اختار العميل الأول");return}
   var need=jointNeed();
   if(VF.joint.size!==need){toast(need?"اختار "+need+" من الشركة معاك":"");return}
+  if(!VF.loc){toast("لازم تحدد موقعك الأول. اضغط «تحديث الموقع».");return}
+  var cc=clientById(VF.cid);
+  if(cc&&(cc.locs||[]).length){var dd=Math.round(minDist(cc,VF.loc));if(dd>GEO){toast("ده مش موقع الدكتور. إنت بعيد حوالي "+dd+" متر.");return}}
+  else if(cc)cc.locs=[{lat:VF.loc.lat,lng:VF.loc.lng,label:""}];
   var at=$("#vf-at").value||(today()+"T09:00");
   var prods=store.products.length?Array.from(VF.prods):($("#vf-pfree")?$("#vf-pfree").value.split(/[,،\n]/).map(function(s){return s.trim()}).filter(Boolean):[]);
   var v={id:newId(),repId:uid,clientId:VF.cid,date:at.slice(0,10),at:new Date(at).toISOString(),outcome:VF.outcome,products:prods,notes:$("#vf-notes").value.trim(),followup:$("#vf-follow").value.trim(),followupDate:$("#vf-fdate").value||"",vtype:VF.type,joint:Array.from(VF.joint),lat:VF.loc?VF.loc.lat:null,lng:VF.loc?VF.loc.lng:null};
@@ -1085,7 +1128,7 @@ async function savePlan(mode){
   for(var k=0;k<days.length;k++){if(!PF.days[days[k]].s){toast("حدد وقت البداية ليوم "+dayName(days[k]));return}}
   var di={},ds={},all=[],seen={};
   days.forEach(function(d){var a=Array.from(PF.days[d].items);di[d]=a;ds[d]=PF.days[d].s;a.forEach(function(i){if(!seen[i]){seen[i]=1;all.push(i)}})});
-  var me=meU(),top=me.role==="bu";
+  var me=meU(),top=topRole(me.role);
   var status=mode==="send"?(top?"approved":"pending"):"draft";
   var row={period:PF.period,start_date:rg[0],end_date:rg[1],items:all,status:status,start_time:ds[days[0]],day_starts:ds,day_items:di};
   var msg=mode==="send"?(top?"الخطة اتعتمدت":"اتبعتت للاعتماد"):"اتحفظت كمسودة";
@@ -1325,6 +1368,24 @@ var A={
   },
   pfDay:function(d){PF.cur=d.v;pfStrip();pfPanel()},
   pfTimeAll:function(){var s=pfDay(PF.cur).s;pfDayList(pfRange()).forEach(function(d){pfDay(d).s=s});toast("اتطبق الوقت على كل الأيام")},
+  addLoc:function(d){
+    var c=clientById(d.id);if(!c)return;
+    window.LOCNEW=null;
+    sheet("إضافة موقع للعميل",'<div class="sub" id="lc-st">جاري تحديد موقعك…</div><div class="field"><label for="lc-label">اسم المكان (اختياري)</label><input id="lc-label" class="in" placeholder="مثال: العيادة التانية"></div><div class="actions"><button class="btn primary" data-act="saveLoc" data-id="'+esc(c.id)+'">حفظ الموقع</button></div>');
+    if(!navigator.geolocation){$("#lc-st").textContent="المتصفح ده مبيدعمش تحديد الموقع.";return}
+    navigator.geolocation.getCurrentPosition(function(p){window.LOCNEW={lat:Math.round(p.coords.latitude*1e6)/1e6,lng:Math.round(p.coords.longitude*1e6)/1e6};var e=$("#lc-st");if(e)e.textContent="تم تحديد موقعك الحالي ✓"},function(){var e=$("#lc-st");if(e)e.textContent="مقدرتش أحدد الموقع. فعّله وحاول تاني."},{enableHighAccuracy:true,timeout:15000,maximumAge:0});
+  },
+  saveLoc:async function(d){
+    var c=clientById(d.id);if(!c)return;
+    if(!window.LOCNEW){toast("استنى لحد ما الموقع يتحدد");return}
+    var locs=(c.locs||[]).concat([{lat:LOCNEW.lat,lng:LOCNEW.lng,label:($("#lc-label").value||"").trim()}]);
+    if(await dbw("clients",function(){return sb.from("clients").update({locs:locs}).eq("id",c.id)},"اتضاف الموقع"))closeSheet();
+  },
+  delLoc:function(d){
+    var c=clientById(d.id);if(!c)return;
+    var locs=(c.locs||[]).filter(function(_,i){return i!==+d.i});
+    return dbw("clients",function(){return sb.from("clients").update({locs:locs}).eq("id",c.id)},"اتحذف الموقع");
+  },
   vfLoc:function(){getLoc()},
   vfProd:function(d,el){if(VF.prods.has(d.v)){VF.prods.delete(d.v);el.classList.remove("on")}else{VF.prods.add(d.v);el.classList.add("on")}},
   vfPick:function(d){VF.cid=d.id;paintVfClient()},
@@ -1350,7 +1411,7 @@ var A={
   pf:function(d){S.pfilter=d.v;render()},
   pfPer:function(d,el){PF.period=d.v;Array.prototype.forEach.call($("#pf-per").children,function(b){b.classList.toggle("on",b===el)});pfSync()},
   savePlan:function(d){return savePlan(d.mode)},
-  submitPlan:function(d){var top=meU().role==="bu";return dbw("plans",function(){return sb.from("plans").update({status:top?"approved":"pending"}).eq("id",d.id)},top?"الخطة اتعتمدت":"اتبعتت للاعتماد")},
+  submitPlan:function(d){var top=topRole(meU().role);return dbw("plans",function(){return sb.from("plans").update({status:top?"approved":"pending"}).eq("id",d.id)},top?"الخطة اتعتمدت":"اتبعتت للاعتماد")},
   recallPlan:function(d){return dbw("plans",function(){return sb.from("plans").update({status:"draft"}).eq("id",d.id)},"رجعت مسودة")},
   delPlan:function(d,el){confirmTwice(el,"p"+d.id,function(){return dbw("plans",function(){return sb.from("plans").delete().eq("id",d.id)},"اتحذفت الخطة")})},
   approve:function(d){return dbw("plans",function(){return sb.from("plans").update({status:"approved"}).eq("id",d.id)},"تم اعتماد الخطة")},

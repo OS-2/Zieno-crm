@@ -1,6 +1,6 @@
 // Service worker: يخلي التطبيق يفتح من غير نت. غيّر رقم النسخة لما تعدل الملفات.
 const P = "zieno-crm-";
-const V = P + "v6";
+const V = P + "v10";
 const CDN = P + "cdn-v1";
 const SHELL = ["./", "./index.html", "./config.js", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./logo.png", "./logo-dark.png"];
 
