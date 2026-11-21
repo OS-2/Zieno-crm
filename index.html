@@ -626,7 +626,9 @@ function clistHtml(){
       var ct=store.cities.filter(function(c){return c.gov===g}).length;
       return {g:g,cs:cs,ct:ct};
     }).sort(function(a,b){return (b.cs-a.cs)||(b.ct-a.ct)});
-    h='<div class="list">'+rows.map(function(r){
+    var hid=0,isMgr=rank(meU())>=2;
+    if(rows.some(function(x){return x.cs>0})&&!S.allGovs){hid=rows.filter(function(x){return !x.cs}).length;rows=rows.filter(function(x){return x.cs>0})}
+    h=(hid&&isMgr?'<div><button class="btn sm" data-act="allGovs" data-v="1">عرض كل المحافظات</button></div>':"")+(S.allGovs&&isMgr?'<div><button class="btn sm" data-act="allGovs" data-v="">إخفاء المحافظات الفاضية</button></div>':"")+'<div class="list">'+rows.map(function(r){
       return '<button class="item '+(r.cs||r.ct?"":"dim")+'" data-act="openGov" data-g="'+esc(r.g)+'"><div class="main"><b>'+esc(r.g)+'</b><span class="sub num">'+r.ct+' مدينة · '+r.cs+' عميل</span></div>'+ic("back","chev")+'</button>';
     }).join("")+'</div>';
     return h;
@@ -1386,6 +1388,7 @@ var A={
     var locs=(c.locs||[]).filter(function(_,i){return i!==+d.i});
     return dbw("clients",function(){return sb.from("clients").update({locs:locs}).eq("id",c.id)},"اتحذف الموقع");
   },
+  allGovs:function(d){S.allGovs=!!d.v;render()},
   vfLoc:function(){getLoc()},
   vfProd:function(d,el){if(VF.prods.has(d.v)){VF.prods.delete(d.v);el.classList.remove("on")}else{VF.prods.add(d.v);el.classList.add("on")}},
   vfPick:function(d){VF.cid=d.id;paintVfClient()},
